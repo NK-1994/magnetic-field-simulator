@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>直線電流がつくる磁場</title>
+<style>
+  :root {
+    --ink: #1c1c1c;
+    --muted: #666;
+    --line: #c9ced6;
+    --panel: #f6f7f9;
+    --accent: #0b3d91;
+    --warn-bg: #fff4d6;
+    --warn-ink: #6b4a00;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, sans-serif;
+    color: var(--ink); background: #fff; font-size: 15px; line-height: 1.5;
+  }
+  header { padding: 10px 16px 6px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+  header h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 10px 16px 20px; }
+  /* 広い画面：キャンバス左・読み取りパネル右（パネルは2行にまたがる）。狭い画面：キャンバス → パネル → 操作、の順に縦に積む */
+  .grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: "canvas panel" "controls panel"; align-items: stretch; }
+  .grid.two { grid-template-areas: "canvas panel"; }
+  .area-canvas { grid-area: canvas; min-width: 0; }
+  .area-controls { grid-area: controls; min-width: 0; }
+  .panel { grid-area: panel; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  @media (max-width: 900px) {
+    .grid, .grid.two { grid-template-columns: minmax(0, 1fr); grid-template-areas: "canvas" "panel" "controls"; }
+    .grid.two { grid-template-areas: "canvas" "panel"; }
+  }
+  .canvas-wrap { position: relative; border: 1px solid var(--line); border-radius: 6px; background: #fff; overflow: hidden; }
+  canvas#field { display: block; width: 100%; touch-action: none; cursor: grab; outline: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .edgehint {
+    position: absolute; left: 8px; right: 8px; bottom: 8px; pointer-events: none;
+    background: rgba(255,244,214,0.96); color: var(--warn-ink); border: 1px solid #e8d49a; border-radius: 5px;
+    padding: 4px 8px; font-size: 13px; font-weight: 600;
+  }
+  .hidden { display: none !important; }
+
+  /* 下：最小限のコントロール */
+  .ctlbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 8px; font-size: 14px; }
+  .ctlbar .grp { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+  .ctlbar .lbl { color: var(--muted); font-size: 13px; }
+  .ctlbar input[type=range] { width: 150px; }
+  .ctlbar .val { font-variant-numeric: tabular-nums; min-width: 3.5em; }
+  button { font: inherit; font-size: 14px; min-height: 34px; padding: 4px 12px; border: 1px solid #444; border-radius: 5px; background: #fff; color: var(--ink); cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0.08); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; font-size: 15px; padding: 8px 14px; }
+  button[aria-pressed="true"].axis { background: #333; color: #fff; border-color: #333; }
+  input, label, summary { touch-action: manipulation; }
+  /* スライダー：指でつかめる大きさのつまみ */
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 34px; margin: 0; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; background: #b9c0ca; border-radius: 2px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: #fff; border: 1.5px solid #444; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+  input[type=range]::-moz-range-track { height: 4px; background: #b9c0ca; border-radius: 2px; }
+  input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 1.5px solid #444; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+  input[type=number] { font: inherit; font-size: 15px; padding: 4px 6px; border: 1px solid #888; border-radius: 4px; width: 100%; min-height: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  details { margin-top: 8px; font-size: 13.5px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13.5px; user-select: none; -webkit-user-select: none; padding: 4px 0; }
+  details .body { margin: 6px 0 0 8px; color: #333; }
+  details .body p { margin: 4px 0; }
+  details .body ul { margin: 4px 0; padding-left: 20px; }
+  details .body li { margin: 2px 0; }
+  .ctl { display: grid; grid-template-columns: 8.5em 1fr 5em; align-items: center; gap: 4px 8px; margin: 6px 0; }
+  .ctl input[type=range] { width: 100%; }
+  .ctl .val { font-variant-numeric: tabular-nums; text-align: right; }
+  .ctl.num { grid-template-columns: 8.5em 7em auto; }
+  /* タッチ端末・狭い画面：タップ領域を 44px 以上に、つまみを大きく */
+  @media (pointer: coarse), (max-width: 900px) {
+    button { min-height: 44px; padding: 6px 14px; }
+    button.primary { min-height: 48px; }
+    input[type=range] { height: 44px; }
+    input[type=range]::-webkit-slider-runnable-track { height: 6px; }
+    input[type=range]::-webkit-slider-thumb { width: 30px; height: 30px; margin-top: -12px; }
+    input[type=range]::-moz-range-thumb { width: 30px; height: 30px; }
+    input[type=number] { min-height: 44px; font-size: 16px; }   /* 16px 未満だと iOS Safari が入力時に画面を拡大する */
+    details summary { min-height: 44px; display: flex; align-items: center; font-size: 15px; }
+    details { font-size: 14.5px; }
+    .ctlbar { font-size: 15px; }
+    .ctlbar .lbl { font-size: 14px; }
+    .ctlbar input[type=range] { width: 180px; max-width: 100%; }
+  }
+
+  /* 右：読み取りパネル */
+  .read { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+  .read .k { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .read .k:first-child { margin-top: 0; }
+  .read .v { font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .read .v .u { font-size: 0.5em; color: var(--muted); margin-left: 4px; }
+  .read .v.big { font-size: 30px; }
+  .read .v.huge { font-size: 40px; font-weight: 700; }
+  .read .formula { font-family: "Times New Roman", "Cambria Math", serif; font-size: 13px; color: #444; margin-top: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+  .read .formula .l { display: block; }
+  .read .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 5px; padding: 4px 8px; font-size: 12.5px; margin-top: 8px; font-weight: 600; }
+  .reccount { font-size: 14px; color: #333; text-align: center; }
+  .reccount b { font-size: 18px; }
+
+  /* 答え合わせ：測定用の操作とは見た目を変える（点線の枠・グレー・小さめ） */
+  .answer {
+    margin-top: auto; border: 1px dashed #b8b8b8; border-radius: 6px; padding: 8px 10px 9px;
+    background: #fafafa; color: #6a6a6a; font-size: 12.5px; line-height: 1.45;
+  }
+  .answer h3 { margin: 0 0 3px; font-size: 12.5px; font-weight: 600; color: #6a6a6a; }
+  .answer p { margin: 0 0 6px; }
+  .answer .chks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .answer button.chk {
+    font-size: 12.5px; min-height: 30px; padding: 2px 8px; border: 1px solid #bdbdbd; border-radius: 3px;
+    background: transparent; color: #6a6a6a; cursor: pointer;
+  }
+  .answer button.chk::before { content: "☐ "; }
+  .answer button.chk[aria-pressed="true"] { background: #e4e4e4; color: #333; border-color: #888; }
+  .answer button.chk[aria-pressed="true"]::before { content: "☑ "; }
+  @media (pointer: coarse), (max-width: 900px) {
+    .answer button.chk { min-height: 44px; font-size: 13.5px; padding: 4px 12px; }
+    .answer { font-size: 13.5px; }
+  }
+
+  /* グラフ画面 */
+  .gbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; font-size: 14px; }
+  .gbar .lbl { color: var(--muted); font-size: 13px; }
+  canvas#graph { display: block; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .hint { color: var(--muted); font-size: 13px; }
+  table.rec { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  table.rec th, table.rec td { border: 1px solid var(--line); padding: 3px 6px; text-align: right; }
+  table.rec th { background: #eaeef4; font-weight: 600; white-space: nowrap; }
+  table.rec td:first-child { text-align: center; color: var(--muted); }
+  table.rec td.x { text-align: center; padding: 0; }
+  table.rec td.x button { border: none; background: transparent; color: #888; padding: 2px 10px; font-size: 16px; min-height: 30px; }
+  table.rec td.x button:hover, table.rec td.x button:active { color: #b00; }
+  @media (pointer: coarse), (max-width: 900px) {
+    table.rec { font-size: 15px; }
+    table.rec th, table.rec td { padding: 6px 8px; }
+    table.rec td.x button { min-height: 44px; min-width: 44px; }
+  }
+  @media (max-width: 480px) {   /* スマートフォン縦：6列が横スクロールなしで収まるように詰める */
+    table.rec { font-size: 13.5px; }
+    table.rec th, table.rec td { padding: 6px 4px; }
+    table.rec td.x button { min-width: 36px; padding: 2px 6px; }
+  }
+  .tblwrap { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+  textarea#csv { width: 100%; height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; margin-top: 4px; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>直線電流がつくる磁場</h1>
+  <span class="sub">方位磁針を動かして、その場所の磁場の向きと強さを読み取ります。</span>
+</header>
+
+<main>
+<!-- ================= 測定画面 ================= -->
+<section id="screenMeasure">
+<div class="grid">
+  <div class="area-canvas">
+    <div class="canvas-wrap" id="wrap">
+      <canvas id="field" tabindex="0" aria-label="直線電流と方位磁針の3D図。背景をドラッグすると視点が回ります。方位磁針をドラッグすると面の上を動きます。矢印キーで1 cm、Shift+矢印キーで1 mm動かせます。"></canvas>
+      <div class="edgehint hidden" id="edgeHint">この視点では面が真横を向いているので、磁針をドラッグできません。「斜めから」か「真上から」を押してください。</div>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <div class="read">
+      <div class="k">導線の中心からの距離 <i>r</i></div>
+      <div class="v big" id="rVal">—</div>
+      <div class="k">磁場の強さ <i>H</i></div>
+      <div class="v huge" id="HVal">—</div>
+      <div class="formula" id="formula"></div>
+      <div class="warn hidden" id="nearWarn"></div>
+    </div>
+    <button type="button" id="recBtn" class="primary">この点を記録する</button>
+    <div class="reccount">記録：<b id="recCount">0</b> 点</div>
+    <button type="button" id="toGraph">記録をグラフで見る</button>
+
+    <div class="answer">
+      <h3>答え合わせ</h3>
+      <p>まず自分で描いてから押しましょう。</p>
+      <div class="chks">
+        <button type="button" class="chk" id="chkLines" aria-pressed="false">磁力線を見る</button>
+        <button type="button" class="chk" id="chkVec" aria-pressed="false">磁場ベクトルを見る</button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="area-controls">
+    <div class="ctlbar">
+      <div class="grp">
+        <label for="I">電流 <i>I</i></label>
+        <input type="range" id="I" min="0.1" max="10" step="0.1" value="5">
+        <span class="val" id="Ival">5.0 A</span>
+        <button type="button" id="dirBtn">電流の向きを反転</button>
+        <span class="lbl" id="dirText"></span>
+      </div>
+    </div>
+    <div class="ctlbar">
+      <div class="grp">
+        <span class="lbl">視点：</span>
+        <button type="button" id="vOblique">斜めから</button>
+        <button type="button" id="vTop">真上から（軸方向）</button>
+        <button type="button" id="vReset">視点をリセット</button>
+      </div>
+      <div class="grp">
+        <span class="lbl">拡大：</span>
+        <input type="range" id="zoom" min="0.5" max="3" step="0.05" value="1">
+        <span class="val" id="zoomVal">1.00×</span>
+      </div>
+    </div>
+
+    <details>
+      <summary>操作のしかた</summary>
+      <div class="body">
+        <ul>
+          <li><b>方位磁針をドラッグ</b>（マウスでも指でも）すると、導線に垂直な面の上を動きます。針の赤い側（N）が磁場の向きです。</li>
+          <li>キーボードがあるときは、矢印キーで 1 cm、Shift＋矢印キーで 1 mm 動かせます。</li>
+          <li>背景をドラッグ（1本指）すると視点が回ります。ホイール／2本指のピンチ／スライダーで拡大縮小できます。</li>
+          <li>iPad やスマートフォンで細かく置きたいときは、先に拡大してからドラッグするか、「詳しい設定」の「磁針の位置」に数値を入れてください。</li>
+          <li>「真上から（軸方向）」を押すと、導線を真上から見た断面になり、ワークシートの図と同じ見え方になります。導線の位置に ⊗（電流が奥向き）または ⊙（手前向き）を描きます。</li>
+          <li>「この点を記録する」で、その場所の <i>r</i> と <i>H</i> がたまります。「記録をグラフで見る」でグラフと表に切り替わります。</li>
+        </ul>
+      </div>
+    </details>
+    <details>
+      <summary>この計算について</summary>
+      <div class="body">
+        <ul>
+          <li>これはシミュレーションです。実測データではありません。</li>
+          <li>無限に長い直線電流を仮定しています（描いている導線は途中で切れていますが、計算上は無限に続きます）。磁場の強さは <i>H</i> = <i>I</i>/(2π<i>r</i>)、向きは右ねじの向きです。</li>
+          <li>地磁気は考慮していません。方位磁針は電流のつくる磁場だけを向きます。</li>
+          <li>実物の方位磁針は水平面内でしか回りません。ここでは磁場の向きそのものを見せています。直線電流（鉛直な導線）の磁場は水平なので、水平な面に置いた針は実物とほぼ同じ挙動になります。</li>
+          <li>導線の中心から 1 mm 以内では計算しません（その場合は導線の表面での値を表示します）。</li>
+        </ul>
+      </div>
+    </details>
+    <details>
+      <summary>詳しい設定</summary>
+      <div class="body">
+        <div class="ctl">
+          <label for="z0">面の高さ <i>z</i><sub>0</sub></label>
+          <input type="range" id="z0" min="-10" max="10" step="0.5" value="0">
+          <span class="val" id="z0Val">0.0 cm</span>
+        </div>
+        <p>方位磁針が動く面（導線に垂直な水平面）の高さです。無限に長い直線電流を仮定しているので、<b>面の高さを変えても、導線からの距離 <i>r</i> が同じなら <i>H</i> は変わりません</b>。</p>
+        <div class="ctl num">
+          <label for="cx">磁針の位置 <i>x</i></label>
+          <input type="number" id="cx" step="0.1" min="-12" max="12" inputmode="decimal">
+          <span class="val" style="text-align:left">cm</span>
+        </div>
+        <div class="ctl num">
+          <label for="cy">磁針の位置 <i>y</i></label>
+          <input type="number" id="cy" step="0.1" min="-12" max="12" inputmode="decimal">
+          <span class="val" style="text-align:left">cm</span>
+        </div>
+        <p>導線の位置が原点です。「真上から」見たとき <i>x</i> は右向き、<i>y</i> は上向きです。ドラッグで細かく置きにくいときは、ここに数値を入れてください。</p>
+        <p><label><input type="checkbox" id="showAxes"> 座標軸と床のグリッドを表示</label></p>
+      </div>
+    </details>
+  </div>
+</div>
+</section>
+
+<!-- ================= グラフ画面 ================= -->
+<section id="screenGraph" hidden>
+<div class="grid two">
+  <div class="area-canvas">
+    <div class="gbar">
+      <button type="button" id="backBtn">← 測定に戻る</button>
+      <span class="lbl">横軸：</span>
+      <button type="button" class="axis" data-gx="r" aria-pressed="true"><i>r</i>〔cm〕</button>
+      <button type="button" class="axis" data-gx="invr" aria-pressed="false">1/<i>r</i>〔1/m〕</button>
+    </div>
+    <canvas id="graph"></canvas>
+    <p class="hint" style="margin:6px 0 0">記録した点を打っています（シミュレーションの値）。横軸を <i>r</i> と 1/<i>r</i> で切り替えて、どちらで直線に乗るか見てください。</p>
+  </div>
+  <aside class="panel">
+    <div class="tblwrap">
+      <table class="rec" id="recTable">
+        <thead><tr><th>#</th><th><i>r</i>〔cm〕</th><th><i>H</i>〔A/m〕</th><th>1/<i>r</i>〔1/m〕</th><th><i>I</i>〔A〕</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="btnrow">
+      <span class="reccount" style="margin-right:auto">記録：<b id="recCount2">0</b> 点</span>
+      <button type="button" id="clearAll">全消去</button>
+    </div>
+    <details>
+      <summary>書き写し用のテキスト（CSV）</summary>
+      <textarea id="csv" readonly></textarea>
+    </details>
+  </aside>
+</div>
+</section>
+</main>
+
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+ * 物理
+ *  座標系：右手系 (x, y, z)。z が鉛直上向き。単位は m。
+ *  導線は z 軸。dir = +1 のとき電流は +z 向き（上向き）、dir = −1 のとき −z 向き（下向き）。
+ *  初期値は dir = −1：「真上から」見たとき電流が奥向き（⊗）になり、ワークシートの図と一致する。
+ *  無限に長い直線電流：H = I/(2πr)、向きは右ねじ。B = μ0 H。
+ * ===================================================================== */
+const MU0 = 4 * Math.PI * 1e-7;   // T·m/A
+const R_WIRE = 0.001;             // 導線の半径 [m]。これより内側は計算しない（発散を防ぐ）
+const DEG = Math.PI / 180;
+const E = 0.12;                   // 場面の半幅 [m]（操作面は ±E の正方形）
+
+const state = {
+  I: 5.0, dir: -1,
+  z0: 0,                          // 操作面（水平面）の高さ [m]
+  compass: { u: 0.02, v: 0 },     // 操作面内の座標 (x, y) [m]
+  showLines: false, showVectors: false, showAxes: false,
+  records: [],
+  gx: 'r',
+};
+const VIEW_OBLIQUE = [-55 * DEG, 25 * DEG];
+const VIEW_TOP = [-90 * DEG, 89.9 * DEG];
+const EL_MAX = 89.9 * DEG;
+const cam = { az: VIEW_OBLIQUE[0], el: VIEW_OBLIQUE[1], zoom: 1, fov: 35 * DEG };
+
+/* ---------- ベクトル ---------- */
+function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function scl(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function len3(a) { return Math.hypot(a[0], a[1], a[2]); }
+function norm(a) { const m = len3(a); return m > 0 ? [a[0] / m, a[1] / m, a[2] / m] : [0, 0, 0]; }
+
+/* 直線電流の磁場 H [A/m]（3D 版から流用・検算済み） */
+function lineField3(p) {
+  const x = p[0], y = p[1];
+  const r = Math.hypot(x, y);
+  if (r < 1e-9) return [0, 0, 0];
+  const H = state.I * state.dir / (2 * Math.PI * r);
+  return [-H * y / r, H * x / r, 0];        // +z 向きの電流 → +z から見て反時計回り
+}
+function wireDist(p) { return Math.hypot(p[0], p[1]); }
+// 導線の中心から R_WIRE 未満なら、導線表面まで押し出す
+function clampPoint(p) {
+  const d = wireDist(p);
+  if (d >= R_WIRE) return { p, clamped: false, dist: d };
+  const u = d > 1e-9 ? [p[0] / d, p[1] / d, 0] : [1, 0, 0];
+  return { p: [u[0] * R_WIRE, u[1] * R_WIRE, p[2]], clamped: true, dist: d };
+}
+function planePoint(u, v) { return [u, v, state.z0]; }
+function compassWorld() { return planePoint(state.compass.u, state.compass.v); }
+function fmt3(v) {
+  if (!isFinite(v)) return '—';
+  if (v === 0) return '0';
+  const av = Math.abs(v);
+  if (av >= 1e-3 && av < 1e6) return v.toFixed(Math.max(0, 2 - Math.floor(Math.log10(av))));
+  return v.toPrecision(3);
+}
+function computeReadout() {
+  const pos = compassWorld();
+  const c = clampPoint(pos);
+  const f = lineField3(c.p);
+  const H = len3(f);
+  const bhat = H > 1e-12 ? scl(f, 1 / H) : [1, 0, 0];
+  return { pos, ep: c.p, clamped: c.clamped, r: c.clamped ? R_WIRE : c.dist, H, B: MU0 * H, bhat, Hvec: f };
+}
+
+/* =====================================================================
+ * 3D 描画：カメラ・投影（3D 版から流用）
+ * ===================================================================== */
+const canvas = document.getElementById('field');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('wrap');
+let cssW = 760, cssH = 540, dpr = 1, CX = 380, CY = 270;
+let V = null;
+let linesDirty = true, vecDirty = true;
+let fieldLines = [], vectors = [];
+let lastNeedle = null;
+const perf = { last: 0, avg: 0, max: 0, n: 0, sum: 0 };
+window.__perf = perf;
+
+function camSetup() {
+  const d = 3.8 * E / cam.zoom;
+  const ce = Math.cos(cam.el), se = Math.sin(cam.el), ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  const pos = [d * ce * ca, d * ce * sa, d * se];
+  const f = norm(scl(pos, -1));
+  const right = norm(cross(f, [0, 0, 1]));      // el は ±89.9° にクランプしてあるので退化しない
+  const up = cross(right, f);
+  const focal = (cssH / 2) / Math.tan(cam.fov / 2);
+  V = { pos, f, right, up, focal, d, E, near: 0.08 * d, s0: focal / d };
+}
+function project(p) {
+  const q = sub(p, V.pos);
+  const zc = dot(q, V.f);
+  const s = V.focal / zc;
+  return [CX + dot(q, V.right) * s, CY - dot(q, V.up) * s, zc, s];
+}
+function screenDir(p, d) {
+  const a = project(p), b = project(add(p, scl(d, E * 0.01)));
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const m = Math.hypot(dx, dy);
+  return m > 1e-9 ? [dx / m, dy / m] : null;
+}
+function rayFromScreen(sx, sy) {
+  return { o: V.pos, d: norm(add(scl(V.f, V.focal), add(scl(V.right, sx - CX), scl(V.up, CY - sy)))) };
+}
+const PLANE_N = [0, 0, 1];
+function planeEdgeOn() {
+  const c = project(compassWorld());
+  const ray = rayFromScreen(c[0], c[1]);
+  return Math.abs(dot(ray.d, PLANE_N)) < 0.12;
+}
+function screenToPlane(sx, sy) {
+  const ray = rayFromScreen(sx, sy);
+  const den = dot(ray.d, PLANE_N);
+  if (Math.abs(den) < 0.12) return null;
+  const t = dot(sub([0, 0, state.z0], ray.o), PLANE_N) / den;
+  if (t <= 0) return null;
+  const P = add(ray.o, scl(ray.d, t));
+  return { u: P[0], v: P[1] };
+}
+function cue(zc) {   // 奥行きの手がかり（0 = 手前 … 1 = 奥）
+  const t = (zc - (V.d - 1.3 * E)) / (2.6 * E);
+  return Math.max(0, Math.min(1, t));
+}
+function topView() { return Math.abs(cam.el) > 75 * DEG; }
+
+/* =====================================================================
+ * 磁力線の追跡（RK4、3D 版から流用）— 「答え合わせ」で使う
+ * ===================================================================== */
+function dirField(p) {
+  const f = lineField3(p);
+  const m = len3(f);
+  if (m < 1e-9) return null;
+  return [f[0] / m, f[1] / m, f[2] / m];
+}
+function distPointSeg(p, a, b) {
+  const ab = sub(b, a), ap = sub(p, a);
+  const L2 = dot(ab, ab);
+  if (L2 < 1e-20) return len3(ap);
+  const t = Math.max(0, Math.min(1, dot(ap, ab) / L2));
+  return len3(sub(ap, scl(ab, t)));
+}
+function trace3(p0, sign, h0, maxSteps, box, rwire) {
+  const pts = [p0];
+  let p = p0, closed = false, exited = false, hitWire = false;
+  for (let s = 0; s < maxSteps; s++) {
+    const h = h0 * Math.max(1, Math.min(6, len3(p) / E));
+    const k1 = dirField(p); if (!k1) break;
+    const k2 = dirField(add(p, scl(k1, sign * h / 2))); if (!k2) break;
+    const k3 = dirField(add(p, scl(k2, sign * h / 2))); if (!k3) break;
+    const k4 = dirField(add(p, scl(k3, sign * h))); if (!k4) break;
+    const q = add(p, scl([k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0], k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1], k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]], sign * h / 6));
+    if (s > 10 && distPointSeg(p0, p, q) < h) { pts.push(p0); closed = true; break; }
+    pts.push(q);
+    p = q;
+    if (Math.abs(p[0]) > box || Math.abs(p[1]) > box || Math.abs(p[2]) > box) { exited = true; break; }
+    if (wireDist(p) < rwire) { hitWire = true; break; }
+  }
+  return { pts, closed, exited, hitWire };
+}
+function rdp(pts, eps) {
+  const n = pts.length;
+  if (n < 3) return pts.slice();
+  const keep = new Uint8Array(n); keep[0] = 1; keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const seg = stack.pop(); const i0 = seg[0], i1 = seg[1];
+    if (i1 - i0 < 2) continue;
+    let imax = -1, dmax = 0;
+    for (let i = i0 + 1; i < i1; i++) {
+      const d = distPointSeg(pts[i], pts[i0], pts[i1]);
+      if (d > dmax) { dmax = d; imax = i; }
+    }
+    if (dmax > eps) { keep[imax] = 1; stack.push([i0, imax], [imax, i1]); }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+  return out;
+}
+function arrowsAlong(pts, spacing, offset) {
+  const arr = [];
+  let acc = 0, next = offset;
+  for (let i = 1; i < pts.length; i++) {
+    const d = sub(pts[i], pts[i - 1]), L = len3(d);
+    while (acc + L >= next && L > 1e-12) {
+      const t = (next - acc) / L;
+      arr.push({ p: add(pts[i - 1], scl(d, t)), t: scl(d, 1 / L) });
+      next += spacing;
+    }
+    acc += L;
+  }
+  return arr;
+}
+function buildFieldLines() {
+  const t0 = performance.now();
+  const box = 5 * E, h0 = E / 200, maxSteps = 8000;
+  const eps = E / 300, spacing = 0.55 * E;
+  const out = [];
+  // 操作面（高さ z0）の上だけに 6 本。学生が磁針を動かして描くのは操作面内の話なので、上下の面には描かない
+  const specs = [];
+  for (let k = 1; k <= 6; k++) specs.push([E * k / 7, state.z0]);
+  specs.forEach(function (sp, k) {
+    const tr = trace3([sp[0], 0, sp[1]], +1, h0, maxSteps, box, R_WIRE);
+    const d = rdp(tr.pts, eps);
+    out.push({ pts: d, closed: tr.closed, arrows: arrowsAlong(d, spacing, 0.18 * E + 0.11 * E * (k % 3)) });
+  });
+  fieldLines = out;
+  linesDirty = false;
+  perf.lastBuildMs = performance.now() - t0;
+}
+function buildVectors() {
+  const G = 14, gap = 2 * E / G;
+  const items = [];
+  let Hmax = 0;
+  for (let i = 0; i <= G; i++) for (let j = 0; j <= G; j++) {
+    const p = planePoint(-E + i * gap, -E + j * gap);
+    const dw = wireDist(p);
+    if (dw < 0.06 * E) continue;
+    const f = lineField3(p);
+    const m = len3(f);
+    if (m < 1e-9) continue;
+    items.push({ p, d: scl(f, 1 / m), m });
+    if (dw > 0.1 * E && m > Hmax) Hmax = m;
+  }
+  if (Hmax <= 0) { vectors = []; vecDirty = false; return; }
+  const lmax = Math.log10(Hmax), lmin = lmax - 2.5;
+  vectors = items.map(function (it) {
+    let t = (Math.log10(it.m) - lmin) / (lmax - lmin);
+    t = Math.max(0, Math.min(1, t));
+    return { p: it.p, d: it.d, t };
+  });
+  vecDirty = false;
+}
+
+/* =====================================================================
+ * プリミティブ（深度つき）を奥から順に描く（画家のアルゴリズム）
+ * ===================================================================== */
+let prims = [];
+function addPath(pts2, depth, color, width, alpha, closed) { prims.push({ k: 'path', pts: pts2, depth, color, width, alpha, closed: !!closed }); }
+function addPoly(pts2, depth, fill, stroke, width, alpha) { prims.push({ k: 'poly', pts: pts2, depth, fill, stroke, width: width || 1, alpha: alpha == null ? 1 : alpha }); }
+function addDot(x, y, r, depth, fill, stroke, width) { prims.push({ k: 'dot', x, y, r, depth, fill, stroke, width: width || 1 }); }
+function addTri(x, y, dir2, size, depth, fill, alpha) {
+  const px = -dir2[1], py = dir2[0];
+  addPoly([[x + dir2[0] * size, y + dir2[1] * size], [x - dir2[0] * size * 0.7 + px * size * 0.55, y - dir2[1] * size * 0.7 + py * size * 0.55],
+    [x - dir2[0] * size * 0.7 - px * size * 0.55, y - dir2[1] * size * 0.7 - py * size * 0.55]], depth, fill, null, 0, alpha);
+}
+function addPolyline3(pts3, color, baseW, alphaFn, chunk) {
+  const proj = pts3.map(project);
+  const n = proj.length;
+  for (let i = 0; i < n - 1; i += chunk) {
+    const j = Math.min(n - 1, i + chunk);
+    let ok = true, zs = 0;
+    for (let k = i; k <= j; k++) { if (proj[k][2] < V.near) { ok = false; break; } zs += proj[k][2]; }
+    if (!ok) continue;
+    const zm = zs / (j - i + 1);
+    const c = cue(zm);
+    const a = alphaFn ? alphaFn(i / (n - 1), j / (n - 1), c) : (1 - 0.55 * c);
+    if (a <= 0.02) continue;
+    addPath(proj.slice(i, j + 1).map(function (q) { return [q[0], q[1]]; }), zm, color, baseW * (1.15 - 0.5 * c), a, false);
+  }
+}
+function niceGrid() {
+  const raw = E / 4;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+function seg3(a, b, color, width, alpha) {
+  const pa = project(a), pb = project(b);
+  if (pa[2] < V.near || pb[2] < V.near) return;
+  addPath([[pa[0], pa[1]], [pb[0], pb[1]]], (pa[2] + pb[2]) / 2, color, width, alpha);
+}
+function buildScene() {
+  prims = [];
+  // --- 床のグリッド（「詳しい設定」で表示したときだけ） ---
+  if (state.showAxes) {
+    const gridStep = niceGrid(), zf = -1.15 * E, nG = Math.floor(E / gridStep);
+    for (let i = -nG; i <= nG; i++) {
+      const x = i * gridStep;
+      for (let j = -nG; j < nG; j++) {
+        const y0 = j * gridStep, y1 = (j + 1) * gridStep;
+        seg3([x, y0, zf], [x, y1, zf], '#d7dbe2', 0.8, 0.9);
+        seg3([y0, x, zf], [y1, x, zf], '#d7dbe2', 0.8, 0.9);
+      }
+    }
+  }
+  // --- 操作面の輪郭（枠だけ。グリッドは描かない） ---
+  {
+    const z = state.z0;
+    const c = [[-E, -E, z], [E, -E, z], [E, E, z], [-E, E, z]];
+    for (let k = 0; k < 4; k++) seg3(c[k], c[(k + 1) % 4], '#a9b2c0', 1, 0.7);
+  }
+  // --- 導線（z 軸）と電流の向きの矢印 ---
+  const wireCol = '#111';
+  const pts = [];
+  for (let k = 0; k <= 40; k++) pts.push([0, 0, -1.4 * E + 2.8 * E * k / 40]);
+  addPolyline3(pts, wireCol, 3.4, function (t0, t1, c) {
+    const t = (t0 + t1) / 2, edge = Math.min(t, 1 - t);
+    return (edge < 0.12 ? edge / 0.12 : 1) * (1 - 0.35 * c);
+  }, 1);
+  if (!topView()) {
+    [-0.45 * E, 0.45 * E].forEach(function (z) {
+      const p = [0, 0, z]; const q = project(p);
+      const sd = screenDir(p, [0, 0, state.dir]);
+      if (q[2] > V.near && sd) addTri(q[0], q[1], sd, 9 * q[3] / V.s0, q[2] - 1e-6, wireCol, 1);
+    });
+  } else {
+    // 真上（または真下）から見たとき：導線の断面を ⊗（奥向き）／⊙（手前向き）で描く
+    const p = [0, 0, state.z0]; const q = project(p);
+    if (q[2] > V.near) {
+      const away = dot([0, 0, state.dir], V.f) > 0;   // 電流が視線と同じ向き（奥へ流れる）
+      const R = Math.max(7, 8 * q[3] / V.s0);
+      addDot(q[0], q[1], R, q[2] - 2e-6, '#fff', wireCol, 2);
+      if (away) {
+        const s = R * 0.62;
+        addPath([[q[0] - s, q[1] - s], [q[0] + s, q[1] + s]], q[2] - 3e-6, wireCol, 2, 1);
+        addPath([[q[0] - s, q[1] + s], [q[0] + s, q[1] - s]], q[2] - 3e-6, wireCol, 2, 1);
+      } else {
+        addDot(q[0], q[1], R * 0.32, q[2] - 3e-6, wireCol, null);
+      }
+    }
+  }
+  // --- 磁力線（答え合わせ） ---
+  if (state.showLines) {
+    const lineCol = '#1a4a8a';
+    fieldLines.forEach(function (fl) {
+      addPolyline3(fl.pts, lineCol, 1.5, null, 6);
+      fl.arrows.forEach(function (ar) {
+        const q = project(ar.p);
+        if (q[2] < V.near) return;
+        const c = cue(q[2]);
+        const sd = screenDir(ar.p, ar.t);
+        if (sd) addTri(q[0], q[1], sd, Math.min(12, 7 * q[3] / V.s0) * (1.1 - 0.4 * c), q[2] - 1e-6, lineCol, 1 - 0.55 * c);
+      });
+    });
+  }
+  // --- 磁場ベクトル（答え合わせ、操作面上） ---
+  if (state.showVectors) {
+    vectors.forEach(function (vv) {
+      const L = E * 0.14 * (0.3 + 0.7 * vv.t);
+      const a = add(vv.p, scl(vv.d, -L / 2)), b = add(vv.p, scl(vv.d, L / 2));
+      const pa = project(a), pb = project(b);
+      if (pa[2] < V.near || pb[2] < V.near) return;
+      const c = cue((pa[2] + pb[2]) / 2);
+      const g = Math.round(190 - 165 * vv.t);
+      const col = 'rgb(' + Math.round(g * 0.5) + ',' + Math.round(g * 0.6) + ',' + Math.min(255, g + 45) + ')';
+      const al = (0.55 + 0.45 * vv.t) * (1 - 0.45 * c);
+      addPath([[pa[0], pa[1]], [pb[0], pb[1]]], (pa[2] + pb[2]) / 2, col, (1 + 1.6 * vv.t) * (1.1 - 0.4 * c), al);
+      const sd = screenDir(b, vv.d);
+      if (sd) addTri(pb[0], pb[1], sd, (3.5 + 4.5 * vv.t) * Math.min(1.8, pb[3] / V.s0), pb[2] - 1e-6, col, al);
+    });
+  }
+  // --- 方位磁針 ---
+  const ro = computeReadout();
+  buildCompass(ro);
+  return ro;
+}
+function buildCompass(ro) {
+  const c = ro.pos;
+  const pc = project(c);
+  if (pc[2] < V.near) { lastNeedle = null; return; }
+  const Rc = 0.09 * E, Ln = 0.125 * E;
+  const eu = [1, 0, 0], ev = [0, 1, 0];
+  const disc = [];
+  for (let k = 0; k < 28; k++) { const t = 2 * Math.PI * k / 28; disc.push(add(c, add(scl(eu, Rc * Math.cos(t)), scl(ev, Rc * Math.sin(t))))); }
+  const dp = disc.map(project);
+  addPoly(dp.map(function (q) { return [q[0], q[1]]; }), pc[2] + 2e-6, 'rgba(255,255,255,0.88)', '#222', 1.6, 1);
+  const cr = 0.035 * E;
+  [[scl(eu, -cr), scl(eu, cr)], [scl(ev, -cr), scl(ev, cr)]].forEach(function (s) {
+    const a = project(add(c, s[0])), d = project(add(c, s[1]));
+    addPath([[a[0], a[1]], [d[0], d[1]]], pc[2] + 1e-6, '#222', 1, 1);
+  });
+  const tipN = add(c, scl(ro.bhat, Ln)), tipS = add(c, scl(ro.bhat, -Ln));
+  const pN = project(tipN), pS = project(tipS);
+  let dx = pN[0] - pc[0], dy = pN[1] - pc[1];
+  let m = Math.hypot(dx, dy);
+  if (m < 1e-6) { dx = 1; dy = 0; m = 1; }
+  const hw = Math.max(3, 5.5 * pc[3] / V.s0);
+  const px = -dy / m * hw, py = dx / m * hw;
+  addPoly([[pN[0], pN[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], (pc[2] + pN[2]) / 2, '#c62828', '#7a1010', 0.8, 1);
+  addPoly([[pS[0], pS[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], (pc[2] + pS[2]) / 2, '#8a8a8a', '#555', 0.8, 1);
+  addDot(pN[0], pN[1], Math.max(2.5, 3.6 * pN[3] / V.s0), pN[2] - 1e-6, '#c62828', '#7a1010');
+  addDot(pc[0], pc[1], Math.max(2, 2.6 * pc[3] / V.s0), pc[2] - 3e-6, '#222', null);
+  lastNeedle = { cx: pc[0], cy: pc[1], nx: pN[0], ny: pN[1], sx: pS[0], sy: pS[1], depthN: pN[2], depthC: pc[2] };
+}
+function drawPrims() {
+  prims.sort(function (a, b) { return b.depth - a.depth; });
+  for (let i = 0; i < prims.length; i++) {
+    const p = prims[i];
+    ctx.globalAlpha = p.alpha == null ? 1 : p.alpha;
+    if (p.k === 'path') {
+      ctx.strokeStyle = p.color; ctx.lineWidth = p.width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let j = 0; j < p.pts.length; j++) { if (j === 0) ctx.moveTo(p.pts[j][0], p.pts[j][1]); else ctx.lineTo(p.pts[j][0], p.pts[j][1]); }
+      if (p.closed) ctx.closePath();
+      ctx.stroke();
+    } else if (p.k === 'poly') {
+      ctx.beginPath();
+      for (let j = 0; j < p.pts.length; j++) { if (j === 0) ctx.moveTo(p.pts[j][0], p.pts[j][1]); else ctx.lineTo(p.pts[j][0], p.pts[j][1]); }
+      ctx.closePath();
+      if (p.fill) { ctx.fillStyle = p.fill; ctx.fill(); }
+      if (p.stroke) { ctx.strokeStyle = p.stroke; ctx.lineWidth = p.width; ctx.stroke(); }
+    } else if (p.k === 'dot') {
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 2 * Math.PI);
+      if (p.fill) { ctx.fillStyle = p.fill; ctx.fill(); }
+      if (p.stroke) { ctx.strokeStyle = p.stroke; ctx.lineWidth = p.width; ctx.stroke(); }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawOverlay() {
+  if (state.showAxes) {   // 座標軸の三脚（左下、画面固定）
+    const ox = 46, oy = cssH - 46, L = 30;
+    const axes = [[[1, 0, 0], 'x'], [[0, 1, 0], 'y'], [[0, 0, 1], 'z']];
+    ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    axes.forEach(function (ax) {
+      const dx = dot(ax[0], V.right), dy = -dot(ax[0], V.up);
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + dx * L, oy + dy * L); ctx.stroke();
+      ctx.fillStyle = '#333'; ctx.fillText(ax[1], ox + dx * (L + 9), oy + dy * (L + 9));
+    });
+    ctx.textAlign = 'left'; ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#777';
+    ctx.fillText('床のグリッド：' + (niceGrid() * 100).toFixed(0) + ' cm 間隔', 8, cssH - 10);
+  }
+  if (lastNeedle) {   // N の文字
+    const dx = lastNeedle.nx - lastNeedle.cx, dy = lastNeedle.ny - lastNeedle.cy;
+    const m = Math.hypot(dx, dy) || 1;
+    ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#c62828';
+    ctx.fillText('N', lastNeedle.nx + dx / m * 11, lastNeedle.ny + dy / m * 11);
+  }
+}
+function draw() {
+  const t0 = performance.now();
+  if (linesDirty && state.showLines) buildFieldLines();
+  if (vecDirty && state.showVectors) buildVectors();
+  camSetup();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  const ro = buildScene();
+  drawPrims();
+  drawOverlay();
+  updateReadout(ro);
+  const dt = performance.now() - t0;
+  perf.last = dt; perf.n++; perf.sum += dt; perf.avg = perf.sum / perf.n; if (dt > perf.max) perf.max = dt;
+  perf.prims = prims.length;
+}
+// 画面の高さ（iOS の 100vh 問題を避けるため visualViewport を優先して実測する）
+function viewportH() {
+  const vv = window.visualViewport;
+  return (vv && vv.height) || window.innerHeight || 720;
+}
+// キャンバスの高さ：幅から決めた高さを、画面の高さの 60% で頭打ちにする（下の操作やパネルが画面外に隠れないように）
+function canvasHeightFor(w) {
+  const ratio = w < 600 ? 0.85 : 0.7;
+  const cap = Math.max(220, Math.round(viewportH() * 0.6));
+  return Math.round(Math.min(620, w * ratio, cap));
+}
+function resize() {
+  const w = wrap.clientWidth || 760;
+  cssW = w; cssH = canvasHeightFor(w);
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+  canvas.style.height = cssH + 'px';
+  CX = cssW / 2; CY = cssH / 2;
+  draw();
+}
+
+/* =====================================================================
+ * 右パネルの読み取り値
+ * ===================================================================== */
+function $(id) { return document.getElementById(id); }
+function updateReadout(ro) {
+  const Hs = fmt3(ro.H);
+  $('rVal').innerHTML = (ro.r * 100).toFixed(2) + '<span class="u">cm</span>';
+  $('HVal').innerHTML = Hs + '<span class="u">A/m</span>';
+  $('formula').innerHTML =
+    '<span class="l"><i>H</i> = <i>I</i>/(2π<i>r</i>) = ' + state.I.toFixed(1) + '/(2π×' + ro.r.toFixed(3) + ') = ' + Hs + ' A/m</span>';
+  const nw = $('nearWarn');
+  nw.classList.toggle('hidden', !ro.clamped);
+  nw.textContent = '導線の中心から ' + (R_WIRE * 1000).toFixed(0) + ' mm 以内では計算しません。表示している値は導線の表面での値です。';
+  $('edgeHint').classList.toggle('hidden', !planeEdgeOn());
+  // 「詳しい設定」の座標入力（入力中の欄は書き換えない）
+  const ae = document.activeElement;
+  const cx = $('cx'), cy = $('cy');
+  if (ae !== cx) cx.value = (state.compass.u * 100).toFixed(1);
+  if (ae !== cy) cy.value = (state.compass.v * 100).toFixed(1);
+}
+
+/* =====================================================================
+ * 記録とグラフ
+ *   1/r の単位はワークシートに合わせて 1/m（r〔cm〕→ 1/r = 100/r〔1/m〕）。
+ *   横軸 1/r で原点を通る直線の傾きは I/(2π)〔A〕になる。
+ * ===================================================================== */
+function addRecord() {
+  const ro = computeReadout();
+  state.records.push({ I: state.I, x: ro.pos[0], y: ro.pos[1], z: ro.pos[2], r: ro.r, H: ro.H, B: ro.B * 1e6 });
+  renderRecords();
+}
+function renderRecords() {
+  const n = state.records.length;
+  $('recCount').textContent = n; $('recCount2').textContent = n;
+  const tb = document.querySelector('#recTable tbody');
+  tb.innerHTML = '';
+  state.records.forEach(function (rec, i) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + (rec.r * 100).toFixed(2) + '</td><td>' + fmt3(rec.H) + '</td><td>' + fmt3(1 / rec.r) + '</td><td>' + rec.I.toFixed(1) + '</td>'
+      + '<td class="x"><button type="button" title="この行を消す" data-i="' + i + '">×</button></td>';
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () { state.records.splice(parseInt(this.dataset.i, 10), 1); renderRecords(); });
+  });
+  const lines = ['r[cm],H[A/m],1/r[1/m],I[A]'];
+  state.records.forEach(function (rec) {
+    lines.push([(rec.r * 100).toFixed(2), rec.H.toPrecision(4), (1 / rec.r).toPrecision(4), rec.I.toFixed(1)].join(','));
+  });
+  $('csv').value = lines.join('\n');
+  if (!$('screenGraph').hidden) drawGraph();
+}
+function niceStep(range) {
+  const raw = range / 5;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+function fitThroughOrigin(rows, xf) {
+  let sxy = 0, sxx = 0;
+  rows.forEach(function (r) { const xv = xf(r); sxy += xv * r.H; sxx += xv * xv; });
+  if (sxx <= 0) return null;
+  const k = sxy / sxx;
+  let ss = 0, st = 0, mean = 0;
+  rows.forEach(function (r) { mean += r.H; }); mean /= rows.length;
+  rows.forEach(function (r) { const e = r.H - k * xf(r); ss += e * e; st += (r.H - mean) * (r.H - mean); });
+  return { k, R2: st > 0 ? 1 - ss / st : NaN };
+}
+function drawGraph() {
+  const gc = $('graph');
+  const W = gc.clientWidth || 600, Hh = Math.round(Math.min(520, W * (W < 600 ? 0.85 : 0.7), Math.max(220, viewportH() * 0.6)));
+  const d = window.devicePixelRatio || 1;
+  gc.width = Math.round(W * d); gc.height = Math.round(Hh * d); gc.style.height = Hh + 'px';
+  const g = gc.getContext('2d');
+  g.setTransform(d, 0, 0, d, 0, 0);
+  g.clearRect(0, 0, W, Hh);
+  const rows = state.records;
+  const xf = state.gx === 'r' ? function (r) { return r.r * 100; } : function (r) { return 1 / r.r; };
+  const xlabel = state.gx === 'r' ? 'r〔cm〕' : '1/r〔1/m〕';
+  const ml = 64, mr = 18, mt = 18, mb = 44;
+  const pw = W - ml - mr, ph = Hh - mt - mb;
+  let xmax = 0, ymax = 0;
+  rows.forEach(function (r) { xmax = Math.max(xmax, xf(r)); ymax = Math.max(ymax, r.H); });
+  if (xmax <= 0) xmax = 1; if (ymax <= 0) ymax = 1;
+  xmax *= 1.12; ymax *= 1.12;
+  const sx = function (v) { return ml + v / xmax * pw; }, sy = function (v) { return mt + ph - v / ymax * ph; };
+  g.fillStyle = '#333'; g.font = '13px system-ui, sans-serif';
+  const xs = niceStep(xmax), ys = niceStep(ymax);
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let v = 0; v <= xmax + 1e-9; v += xs) {
+    const px = sx(v);
+    g.strokeStyle = '#e3e6ea'; g.lineWidth = 1; g.beginPath(); g.moveTo(px, mt); g.lineTo(px, mt + ph); g.stroke();
+    g.strokeStyle = '#333'; g.beginPath(); g.moveTo(px, mt + ph); g.lineTo(px, mt + ph + 4); g.stroke();
+    g.fillText(Number(v.toPrecision(6)).toString(), px, mt + ph + 6);
+  }
+  g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (let v = 0; v <= ymax + 1e-9; v += ys) {
+    const py = sy(v);
+    g.strokeStyle = '#e3e6ea'; g.beginPath(); g.moveTo(ml, py); g.lineTo(ml + pw, py); g.stroke();
+    g.strokeStyle = '#333'; g.beginPath(); g.moveTo(ml - 4, py); g.lineTo(ml, py); g.stroke();
+    g.fillText(Number(v.toPrecision(6)).toString(), ml - 6, py);
+  }
+  g.strokeStyle = '#333'; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(ml, mt); g.lineTo(ml, mt + ph); g.lineTo(ml + pw, mt + ph); g.stroke();
+  g.textAlign = 'center'; g.textBaseline = 'bottom'; g.font = '14px system-ui, sans-serif'; g.fillStyle = '#333';
+  g.fillText(xlabel, ml + pw / 2, Hh - 4);
+  g.save(); g.translate(16, mt + ph / 2); g.rotate(-Math.PI / 2); g.textBaseline = 'top'; g.fillText('H〔A/m〕', 0, 0); g.restore();
+  g.textAlign = 'left'; g.textBaseline = 'top'; g.fillStyle = '#777'; g.font = '12px system-ui, sans-serif';
+  g.fillText('記録 ' + rows.length + ' 点（シミュレーションの値）', ml + 6, mt + 2);
+  rows.forEach(function (r) {
+    const px = sx(xf(r)), py = sy(r.H);
+    g.beginPath(); g.arc(px, py, 5, 0, 2 * Math.PI); g.fillStyle = '#0b3d91'; g.fill();
+    g.lineWidth = 1.5; g.strokeStyle = '#fff'; g.stroke();
+  });
+}
+function showScreen(which) {
+  const m = $('screenMeasure'), gr = $('screenGraph');
+  if (which === 'graph') { m.hidden = true; gr.hidden = false; drawGraph(); }
+  else { gr.hidden = true; m.hidden = false; resize(); }
+}
+
+/* =====================================================================
+ * UI
+ * ===================================================================== */
+function updateDirText() { $('dirText').textContent = state.dir > 0 ? 'いま：上向き' : 'いま：下向き'; }
+function snap(v) { return Math.round(v * 1000) / 1000; }
+function setCompass(u, v) {
+  u = Math.max(-E, Math.min(E, u)); v = Math.max(-E, Math.min(E, v));
+  state.compass.u = snap(u); state.compass.v = snap(v);
+  draw();
+}
+function setZoom(z) {
+  cam.zoom = Math.max(0.5, Math.min(3, z));
+  $('zoom').value = cam.zoom; $('zoomVal').textContent = cam.zoom.toFixed(2) + '×';
+}
+function setView(az, el, zoom) {
+  cam.az = az; cam.el = Math.max(-EL_MAX, Math.min(EL_MAX, el));
+  if (zoom != null) setZoom(zoom);
+  draw();
+}
+function setToggle(btn, on) { btn.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+
+$('I').addEventListener('input', function () { state.I = parseFloat(this.value); $('Ival').textContent = state.I.toFixed(1) + ' A'; vecDirty = true; draw(); });
+$('dirBtn').addEventListener('click', function () { state.dir = -state.dir; updateDirText(); linesDirty = true; vecDirty = true; draw(); });
+$('z0').addEventListener('input', function () { const v = parseFloat(this.value); state.z0 = v / 100; $('z0Val').textContent = v.toFixed(1) + ' cm'; linesDirty = true; vecDirty = true; draw(); });
+$('showAxes').addEventListener('change', function () { state.showAxes = this.checked; draw(); });
+$('chkLines').addEventListener('click', function () { state.showLines = !state.showLines; setToggle(this, state.showLines); draw(); });
+$('chkVec').addEventListener('click', function () { state.showVectors = !state.showVectors; setToggle(this, state.showVectors); draw(); });
+$('zoom').addEventListener('input', function () { setZoom(parseFloat(this.value)); draw(); });
+$('vOblique').addEventListener('click', function () { setView(VIEW_OBLIQUE[0], VIEW_OBLIQUE[1]); });
+$('vTop').addEventListener('click', function () { setView(VIEW_TOP[0], VIEW_TOP[1]); });
+$('vReset').addEventListener('click', function () { setView(VIEW_OBLIQUE[0], VIEW_OBLIQUE[1], 1); });
+$('recBtn').addEventListener('click', addRecord);
+$('toGraph').addEventListener('click', function () { showScreen('graph'); });
+$('backBtn').addEventListener('click', function () { showScreen('measure'); });
+document.querySelectorAll('button.axis').forEach(function (b) {
+  b.addEventListener('click', function () {
+    state.gx = this.dataset.gx;
+    document.querySelectorAll('button.axis').forEach(function (o) { setToggle(o, o === b); });
+    drawGraph();
+  });
+});
+// 「詳しい設定」の座標入力（cm）。空欄や数値でないものは無視する
+function onCoordInput() {
+  const x = parseFloat($('cx').value), y = parseFloat($('cy').value);
+  if (!isFinite(x) || !isFinite(y)) return;
+  setCompass(x / 100, y / 100);
+}
+$('cx').addEventListener('input', onCoordInput);
+$('cy').addEventListener('input', onCoordInput);
+// 全消去：2 段階（1 回目で「本当に消す」に変わり、3 秒以内にもう一度押すと消える）
+let clearArmed = null;
+$('clearAll').addEventListener('click', function () {
+  const b = this;
+  if (clearArmed) { clearTimeout(clearArmed); clearArmed = null; b.textContent = '全消去'; state.records = []; renderRecords(); return; }
+  if (state.records.length === 0) return;
+  b.textContent = '本当に消す？（もう一度押す）';
+  clearArmed = setTimeout(function () { clearArmed = null; b.textContent = '全消去'; }, 3000);
+});
+
+/* --- ポインタ操作（Pointer Events で統一：マウス・ペン・タッチ共通）
+ *   1本指（ポインタ1個）：磁針の上なら磁針のドラッグ、背景なら視点の回転
+ *   2本指：ピンチで拡大縮小
+ *   磁針のドラッグは「つかんだ点と磁針中心のずれ」を保って動かす（指で磁針が隠れても置ける）
+ * --- */
+const ptrs = new Map();
+let dragMode = 'none', last = [0, 0], pinch0 = 0, zoom0 = 1;
+let grabOff = { u: 0, v: 0 };   // 磁針中心 − つかんだ点（操作面内の座標）
+function pointerPos(ev) {
+  const rect = canvas.getBoundingClientRect();
+  return [ev.clientX - rect.left, ev.clientY - rect.top];
+}
+canvas.addEventListener('pointerdown', function (ev) {
+  ev.preventDefault();
+  try { canvas.focus({ preventScroll: true }); } catch (e) { canvas.focus(); }   // 矢印キーを受けるため（画面がスクロールしないように）
+  const p = pointerPos(ev);
+  // 主ポインタ（マウス、または最初の指）が押されたら新しい操作の始まり。pointerup が届かず残った古い指の記録を捨てる
+  if (ev.isPrimary) { ptrs.clear(); dragMode = 'none'; }
+  ptrs.set(ev.pointerId, p);
+  try { canvas.setPointerCapture(ev.pointerId); } catch (e) { }
+  if (ptrs.size === 2) {
+    const arr = Array.from(ptrs.values());
+    pinch0 = Math.hypot(arr[0][0] - arr[1][0], arr[0][1] - arr[1][1]); zoom0 = cam.zoom;
+    dragMode = 'pinch';
+    canvas.style.cursor = 'grab';
+    return;
+  }
+  if (ptrs.size > 2) return;
+  last = p;
+  const c = lastNeedle;
+  const hitR = ev.pointerType === 'touch' ? 44 : 28;   // 指は太いので当たり判定を広げる
+  if (c && Math.hypot(p[0] - c.cx, p[1] - c.cy) < hitR) {
+    if (planeEdgeOn()) { $('edgeHint').classList.remove('hidden'); dragMode = 'none'; return; }
+    dragMode = 'compass';
+    canvas.style.cursor = 'grabbing';
+    const q = screenToPlane(p[0], p[1]);
+    grabOff = q ? { u: state.compass.u - q.u, v: state.compass.v - q.v } : { u: 0, v: 0 };
+  } else {
+    dragMode = 'orbit';
+    canvas.style.cursor = 'grabbing';
+  }
+});
+canvas.addEventListener('pointermove', function (ev) {
+  if (!ptrs.has(ev.pointerId)) return;
+  ev.preventDefault();
+  const p = pointerPos(ev);
+  ptrs.set(ev.pointerId, p);
+  if (dragMode === 'pinch' && ptrs.size === 2) {
+    const arr = Array.from(ptrs.values());
+    const d = Math.hypot(arr[0][0] - arr[1][0], arr[0][1] - arr[1][1]);
+    if (pinch0 > 0 && d > 0) { setZoom(zoom0 * d / pinch0); draw(); }
+    return;
+  }
+  if (dragMode === 'orbit') {
+    cam.az -= (p[0] - last[0]) * 0.007;
+    cam.el = Math.max(-EL_MAX, Math.min(EL_MAX, cam.el + (p[1] - last[1]) * 0.007));
+    last = p;
+    draw();
+  } else if (dragMode === 'compass') {
+    const q = screenToPlane(p[0], p[1]);
+    if (q) setCompass(q.u + grabOff.u, q.v + grabOff.v);
+  }
+});
+function endDrag(ev) {
+  ptrs.delete(ev.pointerId);
+  try { canvas.releasePointerCapture(ev.pointerId); } catch (e) { }
+  if (ptrs.size === 0) { dragMode = 'none'; canvas.style.cursor = 'grab'; }
+  else if (dragMode === 'pinch' && ptrs.size === 1) { dragMode = 'none'; }   // 片方の指を離したら、残った指では何もしない（指を離し直すと再開できる）
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('lostpointercapture', endDrag);
+canvas.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });   // 長押しメニューを出さない
+canvas.addEventListener('wheel', function (ev) {
+  ev.preventDefault();
+  setZoom(cam.zoom * Math.exp(-ev.deltaY * 0.0012));
+  draw();
+}, { passive: false });
+canvas.addEventListener('keydown', function (ev) {
+  const step = ev.shiftKey ? 0.001 : 0.01;   // 矢印キー：1 cm、Shift＋矢印キー：1 mm
+  let du = 0, dv = 0;
+  if (ev.key === 'ArrowLeft') du = -step; else if (ev.key === 'ArrowRight') du = step;
+  else if (ev.key === 'ArrowUp') dv = step; else if (ev.key === 'ArrowDown') dv = -step;
+  else return;
+  ev.preventDefault();
+  setCompass(state.compass.u + du, state.compass.v + dv);
+});
+function onViewportChange() { if (!$('screenMeasure').hidden) resize(); else drawGraph(); }
+window.addEventListener('resize', onViewportChange);
+window.addEventListener('orientationchange', function () { setTimeout(onViewportChange, 150); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', onViewportChange);
+
+/* =====================================================================
+ * 自己検算（コンソールから window.__selfTest() で実行）
+ * ===================================================================== */
+window.__selfTest = function () {
+  const out = [];
+  const row = function (name, analytic, numeric) { out.push({ name, analytic, numeric, relErr: Math.abs(numeric - analytic) / Math.max(1e-30, Math.abs(analytic)) }); };
+  const flag = function (name, ok) { out.push({ name, analytic: 1, numeric: ok ? 1 : 0, relErr: ok ? 0 : 1 }); };
+  const saved = JSON.parse(JSON.stringify(state));
+  const savedCam = { az: cam.az, el: cam.el, zoom: cam.zoom };
+  // 1. 直線電流 I = 5 A, r = 2 cm
+  Object.assign(state, { I: 5, dir: 1, z0: 0 });
+  let f = lineField3([0.02, 0, 0]);
+  row('直線 I=5A r=2cm: H [A/m]', 5 / (2 * Math.PI * 0.02), len3(f));
+  row('直線 I=5A r=2cm: B [μT]', MU0 * 5 / (2 * Math.PI * 0.02) * 1e6, MU0 * len3(f) * 1e6);
+  flag('直線 +z 向き電流のとき (r,0,0) で Hy > 0（+z から見て反時計回り）、Hz = 0', f[1] > 0 && Math.abs(f[2]) < 1e-12);
+  state.dir = -1;
+  f = lineField3([0.02, 0, 0]);
+  flag('直線 −z 向き電流（初期値）のとき (r,0,0) で Hy < 0（+z から見て時計回り）', f[1] < 0);
+  state.dir = 1;
+  f = lineField3([0.01, 0.02, 0.05]);
+  row('直線 (1,2,5)cm: H = I/(2π·√5 cm)', 5 / (2 * Math.PI * Math.hypot(0.01, 0.02)), len3(f));
+  // 2. 高さによらない（無限直線）
+  row('直線 z=0 と z=5cm で H が同じ（r=3cm）', len3(lineField3([0.03, 0, 0])), len3(lineField3([0.03, 0, 0.05])));
+  // 3. 読み取り値（clamp を含む）：初期位置 r = 2 cm
+  state.compass = { u: 0.02, v: 0 };
+  let ro = computeReadout();
+  row('読み取り r [cm] = 2', 2, ro.r * 100);
+  row('読み取り H [A/m] = 39.79', 39.7887, ro.H);
+  row('読み取り B [μT] = 50.0', 50.0, ro.B * 1e6);
+  state.compass = { u: 0.0002, v: 0 };
+  ro = computeReadout();
+  flag('導線から 0.2 mm では表面（1 mm）の値にクランプされる', ro.clamped && Math.abs(ro.r - R_WIRE) < 1e-12);
+  // 4. 磁力線の追跡：閉じること・半径のずれ
+  let tr = trace3([0.05, 0, 0], +1, E / 200, 8000, 5 * E, R_WIRE);
+  flag('直線 r=5cm の磁力線が閉じる（円）', tr.closed);
+  let rmaxDev = 0; tr.pts.forEach(function (p) { rmaxDev = Math.max(rmaxDev, Math.abs(Math.hypot(p[0], p[1]) - 0.05)); });
+  row('直線 磁力線の半径のずれ最大 [m]（0 が理想）', 0, rmaxDev); out[out.length - 1].relErr = rmaxDev / 0.05;
+  // 5. 記録 → 1/r に対する直線の傾き = I/(2π)
+  const rows = [0.01, 0.02, 0.03, 0.05, 0.08].map(function (r) { state.compass = { u: r, v: 0 }; const q = computeReadout(); return { I: state.I, r: q.r, H: q.H }; });
+  const ft = fitThroughOrigin(rows, function (r) { return 1 / r.r; });
+  row('H 対 1/r の原点を通る直線の傾き = I/(2π) [A]', 5 / (2 * Math.PI), ft.k);
+  row('同 R² = 1', 1, ft.R2);
+  // 6. 真上からの視点：導線の両端が画面上で同じ点に投影される（点に見える）、+x が右・+y が上
+  cam.az = VIEW_TOP[0]; cam.el = VIEW_TOP[1]; cam.zoom = 1;
+  camSetup();
+  const pTop = project([0, 0, 1.4 * E]), pBot = project([0, 0, -1.4 * E]);
+  row('真上から：導線の両端の画面上の距離 [px]（≈0）', 0, Math.hypot(pTop[0] - pBot[0], pTop[1] - pBot[1])); out[out.length - 1].relErr = out[out.length - 1].numeric / 10;
+  const px = project([0.02, 0, 0]), py = project([0, 0.02, 0]), po = project([0, 0, 0]);
+  flag('真上から：+x が画面右、+y が画面上', px[0] > po[0] + 5 && Math.abs(px[1] - po[1]) < 1 && py[1] < po[1] - 5 && Math.abs(py[0] - po[0]) < 1);
+  flag('真上から：初期値 dir=−1 の電流は視線と同じ向き（奥向き ⊗）', dot([0, 0, -1], V.f) > 0);
+  Object.assign(state, saved);
+  cam.az = savedCam.az; cam.el = savedCam.el; cam.zoom = savedCam.zoom;
+  linesDirty = true; vecDirty = true; draw();
+  return out;
+};
+window.__debug = function () {
+  const ro = computeReadout();
+  camSetup();
+  const c = project(ro.pos), tipN = project(add(ro.pos, scl(ro.bhat, 0.125 * E)));
+  const expAng = Math.atan2(tipN[1] - c[1], tipN[0] - c[0]) / DEG;
+  const drawnAng = lastNeedle ? Math.atan2(lastNeedle.ny - lastNeedle.cy, lastNeedle.nx - lastNeedle.cx) / DEG : null;
+  return { pos_cm: ro.pos.map(function (v) { return v * 100; }), r_cm: ro.r * 100, H: ro.H, B_uT: ro.B * 1e6, bhat: ro.bhat, dir: state.dir, I: state.I,
+    expectedScreenAngleDeg: expAng, drawnNeedleAngleDeg: drawnAng, needle: lastNeedle, cam: { azDeg: cam.az / DEG, elDeg: cam.el / DEG, zoom: cam.zoom },
+    show: { lines: state.showLines, vectors: state.showVectors, axes: state.showAxes }, records: state.records.length, prims: prims.length,
+    fieldLines: fieldLines.map(function (fl) { let zmin = Infinity, zmax = -Infinity; fl.pts.forEach(function (p) { zmin = Math.min(zmin, p[2]); zmax = Math.max(zmax, p[2]); }); return { n: fl.pts.length, closed: fl.closed, zmin_cm: zmin * 100, zmax_cm: zmax * 100 }; }),
+    canvas: { w: cssW, h: cssH, dpr } };
+};
+window.__setCompass = function (u, v) { setCompass(u, v); };
+window.__setView = function (azDeg, elDeg, zoom) { setView(azDeg * DEG, elDeg * DEG, zoom); };
+window.__addRecord = addRecord;
+window.__state = state;
+
+/* ===================================================================== 起動 */
+function init() {
+  $('Ival').textContent = state.I.toFixed(1) + ' A';
+  $('z0Val').textContent = (state.z0 * 100).toFixed(1) + ' cm';
+  updateDirText();
+  renderRecords();
+  resize();
+}
+init();
+})();
+</script>
+</body>
+</html>
