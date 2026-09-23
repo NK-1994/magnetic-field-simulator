@@ -145,6 +145,8 @@
   .tblwrap { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
   textarea#csv { width: 100%; height: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; margin-top: 4px; }
   .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dirleg { display: inline-block; white-space: nowrap; margin-right: 1em; }
+.dirsym { font-size: 1.25em; font-weight: bold; color: #111; vertical-align: -0.08em; }
 </style>
 </head>
 <body>
@@ -194,7 +196,7 @@
         <input type="range" id="I" min="0.1" max="10" step="0.1" value="5">
         <span class="val" id="Ival">5.0 A</span>
         <button type="button" id="dirBtn">電流の向きを反転</button>
-        <span class="lbl" id="dirText"></span>
+        <span class="lbl" id="dirText"><span class="dirleg"><span class="dirsym">⊗</span>：画面の奥へ向かう電流</span><span class="dirleg"><span class="dirsym">⊙</span>：画面の手前へ向かう電流</span></span>
       </div>
     </div>
     <div class="ctlbar">
@@ -219,7 +221,7 @@
           <li>キーボードがあるときは、矢印キーで 1 cm、Shift＋矢印キーで 1 mm 動かせます。</li>
           <li>背景をドラッグ（1本指）すると視点が回ります。ホイール／2本指のピンチ／スライダーで拡大縮小できます。</li>
           <li>iPad やスマートフォンで細かく置きたいときは、先に拡大してからドラッグするか、「詳しい設定」の「磁針の位置」に数値を入れてください。</li>
-          <li>「真上から（軸方向）」を押すと、導線を真上から見た断面になり、ワークシートの図と同じ見え方になります。導線の位置に ⊗（電流が奥向き）または ⊙（手前向き）を描きます。</li>
+          <li>最初は導線を真上から見た断面で表示され、ワークシートの図と同じ見え方になっています。導線の位置に ⊗（電流が奥向き）または ⊙（手前向き）を描きます。「斜めから」を押すと立体的に見られます。「真上から（軸方向）」または「視点をリセット」で元の向きに戻ります。</li>
           <li>「この点を記録する」で、その場所の <i>r</i> と <i>H</i> がたまります。「記録をグラフで見る」でグラフと表に切り替わります。</li>
         </ul>
       </div>
@@ -323,7 +325,7 @@ const state = {
 const VIEW_OBLIQUE = [-55 * DEG, 25 * DEG];
 const VIEW_TOP = [-90 * DEG, 89.9 * DEG];
 const EL_MAX = 89.9 * DEG;
-const cam = { az: VIEW_OBLIQUE[0], el: VIEW_OBLIQUE[1], zoom: 1, fov: 35 * DEG };
+const cam = { az: VIEW_TOP[0], el: VIEW_TOP[1], zoom: 1, fov: 35 * DEG };   // 初期視点は真上から（ワークシートの図と同じ向き）
 
 /* ---------- ベクトル ---------- */
 function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
@@ -681,9 +683,10 @@ function buildCompass(ro) {
   if (m < 1e-6) { dx = 1; dy = 0; m = 1; }
   const hw = Math.max(3, 5.5 * pc[3] / V.s0);
   const px = -dy / m * hw, py = dx / m * hw;
-  addPoly([[pN[0], pN[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], (pc[2] + pN[2]) / 2, '#c62828', '#7a1010', 0.8, 1);
-  addPoly([[pS[0], pS[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], (pc[2] + pS[2]) / 2, '#8a8a8a', '#555', 0.8, 1);
-  addDot(pN[0], pN[1], Math.max(2.5, 3.6 * pN[3] / V.s0), pN[2] - 1e-6, '#c62828', '#7a1010');
+  // 針は文字盤より必ず手前に描く（N 極が奥を向いたとき、文字盤に隠れないように）
+  addPoly([[pN[0], pN[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], pc[2] - 1e-6, '#c62828', '#7a1010', 0.8, 1);
+  addPoly([[pS[0], pS[1]], [pc[0] + px, pc[1] + py], [pc[0] - px, pc[1] - py]], pc[2] - 1e-6, '#8a8a8a', '#555', 0.8, 1);
+  addDot(pN[0], pN[1], Math.max(2.5, 3.6 * pN[3] / V.s0), pc[2] - 2e-6, '#c62828', '#7a1010');
   addDot(pc[0], pc[1], Math.max(2, 2.6 * pc[3] / V.s0), pc[2] - 3e-6, '#222', null);
   lastNeedle = { cx: pc[0], cy: pc[1], nx: pN[0], ny: pN[1], sx: pS[0], sy: pS[1], depthN: pN[2], depthC: pc[2] };
 }
@@ -894,7 +897,7 @@ function showScreen(which) {
 /* =====================================================================
  * UI
  * ===================================================================== */
-function updateDirText() { $('dirText').textContent = state.dir > 0 ? 'いま：上向き' : 'いま：下向き'; }
+function updateDirText() { /* 向きの凡例（⊗・⊙）は常に固定表示にしたので、ここでは何もしない */ }
 function snap(v) { return Math.round(v * 1000) / 1000; }
 function setCompass(u, v) {
   u = Math.max(-E, Math.min(E, u)); v = Math.max(-E, Math.min(E, v));
@@ -921,7 +924,7 @@ $('chkVec').addEventListener('click', function () { state.showVectors = !state.s
 $('zoom').addEventListener('input', function () { setZoom(parseFloat(this.value)); draw(); });
 $('vOblique').addEventListener('click', function () { setView(VIEW_OBLIQUE[0], VIEW_OBLIQUE[1]); });
 $('vTop').addEventListener('click', function () { setView(VIEW_TOP[0], VIEW_TOP[1]); });
-$('vReset').addEventListener('click', function () { setView(VIEW_OBLIQUE[0], VIEW_OBLIQUE[1], 1); });
+$('vReset').addEventListener('click', function () { setView(VIEW_TOP[0], VIEW_TOP[1], 1); });
 $('recBtn').addEventListener('click', addRecord);
 $('toGraph').addEventListener('click', function () { showScreen('graph'); });
 $('backBtn').addEventListener('click', function () { showScreen('measure'); });
